@@ -6,6 +6,7 @@ import traceback
 from exercises import get_exercises, get_exercise_by_id
 from progress_tracker import ProgressTracker
 from code_executor import execute_code
+from code_quality import analyze_code_quality, format_feedback
 
 # Initialize session state
 if 'progress_tracker' not in st.session_state:
@@ -149,7 +150,7 @@ def display_exercise():
     st.session_state.code_content = code
     
     # Action buttons
-    col1, col2, col3 = st.columns([1, 1, 2])
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
     
     with col1:
         if st.button("▶️ Run Code", type="primary"):
@@ -160,6 +161,10 @@ def display_exercise():
             submit_solution(code, exercise)
     
     with col3:
+        if st.button("🔍 Check Quality"):
+            check_code_quality(code)
+    
+    with col4:
         if st.button("🔄 Reset Code"):
             st.session_state.code_content = exercise.get('starter_code', '')
             st.rerun()
@@ -187,6 +192,37 @@ def run_code(code, exercise):
             
     except Exception as e:
         st.error(f"Unexpected error: {str(e)}")
+
+def check_code_quality(code):
+    """Analyze code quality and provide feedback"""
+    if not code.strip():
+        st.warning("Please write some code before checking quality!")
+        return
+    
+    st.markdown("### 🔍 Code Quality Analysis")
+    
+    with st.spinner("Analyzing your code..."):
+        try:
+            # Analyze code quality
+            analysis = analyze_code_quality(code)
+            feedback = format_feedback(analysis)
+            
+            # Display the formatted feedback
+            st.markdown(feedback)
+            
+            # Show score with color coding
+            score = analysis.get('score', 0)
+            if score >= 90:
+                st.success(f"Outstanding! Your code quality score is {score}/100")
+            elif score >= 75:
+                st.info(f"Good work! Your code quality score is {score}/100")
+            elif score >= 60:
+                st.warning(f"Not bad! Your code quality score is {score}/100 - room for improvement")
+            else:
+                st.error(f"Code quality score: {score}/100 - consider the suggestions above")
+                
+        except Exception as e:
+            st.error(f"Error analyzing code quality: {str(e)}")
 
 def submit_solution(code, exercise):
     """Submit and validate the solution"""
@@ -234,6 +270,15 @@ def submit_solution(code, exercise):
             st.success(f"🎉 Congratulations! All {total_tests} tests passed!")
             st.session_state.progress_tracker.mark_completed(exercise['id'])
             st.session_state.progress_tracker.save_progress()
+            
+            # Provide code quality feedback on successful completion
+            with st.expander("📊 Code Quality Feedback"):
+                try:
+                    analysis = analyze_code_quality(code)
+                    feedback = format_feedback(analysis)
+                    st.markdown(feedback)
+                except Exception as e:
+                    st.info("Code quality analysis not available for this submission.")
         else:
             st.warning(f"You passed {passed_tests}/{total_tests} tests. Keep trying!")
     
@@ -242,6 +287,15 @@ def submit_solution(code, exercise):
         st.success("🎉 Solution submitted successfully!")
         st.session_state.progress_tracker.mark_completed(exercise['id'])
         st.session_state.progress_tracker.save_progress()
+        
+        # Provide code quality feedback
+        with st.expander("📊 Code Quality Feedback"):
+            try:
+                analysis = analyze_code_quality(code)
+                feedback = format_feedback(analysis)
+                st.markdown(feedback)
+            except Exception as e:
+                st.info("Code quality analysis not available for this submission.")
 
 if __name__ == "__main__":
     main()
