@@ -7,6 +7,7 @@ from exercises import get_exercises, get_exercise_by_id
 from progress_tracker import ProgressTracker
 from code_executor import execute_code
 from code_quality import analyze_code_quality, format_feedback
+from concept_explanations import get_category_concepts, get_enhanced_hints
 
 # Initialize session state
 if 'progress_tracker' not in st.session_state:
@@ -44,6 +45,22 @@ def main():
         
         st.divider()
         
+        # Learning Resources section
+        with st.expander("📚 Learning Resources"):
+            st.markdown("**Quick Tips:**")
+            hints = get_enhanced_hints()
+            
+            tip_type = st.selectbox(
+                "Choose tip category:",
+                ["debugging_tips", "problem_solving_strategies", "python_specific_tips"],
+                format_func=lambda x: x.replace("_", " ").title()
+            )
+            
+            for tip in hints[tip_type]:
+                st.markdown(f"• {tip}")
+        
+        st.divider()
+        
         # Exercise categories
         exercises = get_exercises()
         categories = list(exercises.keys())
@@ -62,6 +79,9 @@ def main():
                     key=f"btn_{exercise['id']}",
                     use_container_width=True
                 ):
+                    # Reset state when switching exercises
+                    if st.session_state.current_exercise_id != exercise['id']:
+                        st.session_state.show_concepts = False
                     st.session_state.current_exercise_id = exercise['id']
                     st.session_state.code_content = exercise.get('starter_code', '')
                     st.rerun()
@@ -84,6 +104,8 @@ def display_welcome():
     - 📊 **Progress Tracking** - Keep track of completed exercises
     - 🎯 **Structured Learning** - Exercises organized by difficulty level
     - 🔍 **Error Handling** - Clear error messages to help you debug
+    - 🔍 **Code Quality Analysis** - Get feedback on your coding style
+    - 📚 **Concept Explanations** - Learn Python concepts as you practice
     
     ### Getting Started:
     1. Choose an exercise from the sidebar
@@ -91,9 +113,44 @@ def display_welcome():
     3. Write your code in the editor
     4. Click "Run Code" to test your solution
     5. Use the "Submit Solution" button when you're confident in your answer
+    6. Check code quality and learn concepts for deeper understanding
     
     **Select an exercise from the sidebar to begin your Python journey!**
     """)
+
+def display_concept_explanations(difficulty):
+    """Display concept explanations for the given difficulty level"""
+    st.markdown("---")
+    st.markdown("### 📚 Related Python Concepts")
+    
+    concepts = get_category_concepts(difficulty)
+    
+    if not concepts:
+        st.info("No specific concept explanations available for this category yet.")
+        return
+    
+    # Create tabs for different concepts
+    concept_tabs = st.tabs([concept['title'] for concept in concepts])
+    
+    for i, concept in enumerate(concepts):
+        with concept_tabs[i]:
+            # Display the main explanation
+            st.markdown(concept['explanation'])
+            
+            # Display examples if available
+            if 'examples' in concept:
+                st.markdown("#### 💻 Examples")
+                for example in concept['examples']:
+                    with st.expander(f"📝 {example['title']}"):
+                        st.code(example['code'], language='python')
+            
+            # Display common mistakes if available
+            if 'common_mistakes' in concept:
+                st.markdown("#### ⚠️ Common Mistakes to Avoid")
+                for mistake in concept['common_mistakes']:
+                    st.markdown(f"• {mistake}")
+    
+    st.markdown("---")
 
 def display_exercise():
     exercise = get_exercise_by_id(st.session_state.current_exercise_id)
@@ -102,7 +159,7 @@ def display_exercise():
         return
     
     # Exercise header
-    col1, col2 = st.columns([3, 1])
+    col1, col2, col3 = st.columns([3, 1, 1])
     with col1:
         st.header(f"📝 {exercise['title']}")
         st.markdown(f"**Difficulty:** {exercise['difficulty'].title()}")
@@ -113,6 +170,16 @@ def display_exercise():
             st.success("✅ Completed")
         else:
             st.info("⭕ Not Completed")
+    
+    with col3:
+        # Add concept explanations button
+        if st.button("📖 Learn Concepts"):
+            st.session_state.show_concepts = not st.session_state.get('show_concepts', False)
+            st.rerun()
+    
+    # Show concept explanations if requested
+    if st.session_state.get('show_concepts', False):
+        display_concept_explanations(exercise['difficulty'])
     
     # Exercise description
     st.markdown("### 📋 Instructions")
