@@ -61,7 +61,7 @@ print(result)""",
             "hint": "Use list comprehensions for calculations and a loop to find the maximum revenue product",
             "test_cases": [
                 {
-                    "test": "result = analyze_sales(sales_data)\nassert result['total_revenue'] == 8500\nassert result['avg_price'] == 433.33\nassert result['top_product'] == 'Laptop'",
+                    "test": "result = analyze_sales(sales_data)\nassert result['total_revenue'] == 9500\nassert abs(result['avg_price'] - 433.33) < 0.01\nassert result['top_product'] == 'Laptop'",
                     "expected": ""
                 }
             ],
@@ -437,7 +437,7 @@ def render_template(template, context):
             # Replace variables in loop content with item properties
             item_content = loop_content
             for key, value in item.items():
-                item_content = item_content.replace(f'{{{{ {key} }}}}', str(value))
+                item_content = item_content.replace(f'{{{{{key}}}}}', str(value))
             output += item_content
         
         return output
@@ -447,7 +447,7 @@ def render_template(template, context):
             "hint": "Use regular expressions to find {{variable}} patterns and replace them with dictionary values",
             "test_cases": [
                 {
-                    "test": "result = render_template('Hello {{name}}!', {'name': 'World'})\nassert result == 'Hello World!'",
+                    "test": "result = render_template('Hello {{name}}!', {'name': 'World'})\nassert result == 'Hello World!'\nloop_result = render_template('{{#each users}}{{name}} {{/each}}', {'users': [{'name': 'A'}]})\nassert loop_result == 'A '",
                     "expected": ""
                 }
             ],
