@@ -8,16 +8,24 @@ from progress_tracker import ProgressTracker
 from code_executor import execute_code
 from code_quality import analyze_code_quality, format_feedback
 from concept_explanations import get_category_concepts, get_enhanced_hints
+from custom_exercises import CustomExerciseManager, get_difficulty_options, get_example_exercise_templates, validate_test_case
+from specialized_tracks import get_specialized_tracks
 
 # Initialize session state
 if 'progress_tracker' not in st.session_state:
     st.session_state.progress_tracker = ProgressTracker()
+
+if 'custom_exercise_manager' not in st.session_state:
+    st.session_state.custom_exercise_manager = CustomExerciseManager()
 
 if 'current_exercise_id' not in st.session_state:
     st.session_state.current_exercise_id = None
 
 if 'code_content' not in st.session_state:
     st.session_state.code_content = ""
+
+if 'current_page' not in st.session_state:
+    st.session_state.current_page = "exercises"
 
 def main():
     st.set_page_config(
@@ -31,6 +39,22 @@ def main():
     
     # Sidebar for navigation
     with st.sidebar:
+        st.header("🧭 Navigation")
+        
+        # Page selection
+        page_options = {
+            "exercises": "📚 Practice Exercises",
+            "custom_builder": "🔨 Create Exercise",
+            "custom_list": "📝 My Exercises"
+        }
+        
+        for page_key, page_name in page_options.items():
+            if st.button(page_name, key=f"nav_{page_key}", use_container_width=True):
+                st.session_state.current_page = page_key
+                st.session_state.show_concepts = False
+                st.rerun()
+        
+        st.divider()
         st.header("📚 Exercises")
         
         # Progress overview
@@ -85,12 +109,42 @@ def main():
                     st.session_state.current_exercise_id = exercise['id']
                     st.session_state.code_content = exercise.get('starter_code', '')
                     st.rerun()
+        
+        # Specialized tracks
+        st.divider()
+        st.subheader("🎯 Specialized Tracks")
+        
+        specialized_tracks = get_specialized_tracks()
+        for track_key, track_data in specialized_tracks.items():
+            with st.expander(f"{track_data['icon']} {track_data['title']}"):
+                st.markdown(track_data['description'])
+                
+                for exercise in track_data['exercises']:
+                    is_completed = st.session_state.progress_tracker.is_completed(exercise['id'])
+                    status_icon = "✅" if is_completed else "⭕"
+                    
+                    if st.button(
+                        f"{status_icon} {exercise['title']}", 
+                        key=f"btn_track_{exercise['id']}",
+                        use_container_width=True
+                    ):
+                        # Reset state when switching exercises
+                        if st.session_state.current_exercise_id != exercise['id']:
+                            st.session_state.show_concepts = False
+                        st.session_state.current_exercise_id = exercise['id']
+                        st.session_state.code_content = exercise.get('starter_code', '')
+                        st.rerun()
     
     # Main content area
-    if st.session_state.current_exercise_id:
-        display_exercise()
-    else:
-        display_welcome()
+    if st.session_state.current_page == "exercises":
+        if st.session_state.current_exercise_id:
+            display_exercise()
+        else:
+            display_welcome()
+    elif st.session_state.current_page == "custom_builder":
+        display_exercise_builder()
+    elif st.session_state.current_page == "custom_list":
+        display_custom_exercises()
 
 def display_welcome():
     st.markdown("""
@@ -153,7 +207,26 @@ def display_concept_explanations(difficulty):
     st.markdown("---")
 
 def display_exercise():
-    exercise = get_exercise_by_id(st.session_state.current_exercise_id)
+    exercise_id = st.session_state.current_exercise_id
+    
+    # Try to get from built-in exercises first
+    exercise = get_exercise_by_id(exercise_id)
+    
+    # If not found, try custom exercises
+    if not exercise and exercise_id.startswith('custom_'):
+        exercise = st.session_state.custom_exercise_manager.get_exercise_by_id(exercise_id)
+    
+    # If not found, try specialized tracks
+    if not exercise:
+        specialized_tracks = get_specialized_tracks()
+        for track_data in specialized_tracks.values():
+            for track_exercise in track_data['exercises']:
+                if track_exercise['id'] == exercise_id:
+                    exercise = track_exercise
+                    break
+            if exercise:
+                break
+    
     if not exercise:
         st.error("Exercise not found!")
         return
@@ -317,10 +390,16 @@ def submit_solution(code, exercise):
             test_result = execute_code(test_code)
             
             if test_result['success']:
-                expected = test_case['expected']
+                expected = test_case.get('expected', '')
                 actual = test_result['output'].strip()
                 
-                if actual == expected:
+                # Check if this is an assertion-based test (no expected output)
+                if not expected or expected.lower() in ['', 'none', 'no output']:
+                    # For assertion-based tests, success means the test passed
+                    st.success(f"✅ Test {i+1}: Passed (assertion test)")
+                    passed_tests += 1
+                elif actual == expected:
+                    # For output-comparison tests
                     st.success(f"✅ Test {i+1}: Passed")
                     passed_tests += 1
                 else:
@@ -328,8 +407,13 @@ def submit_solution(code, exercise):
                     st.write(f"Expected: `{expected}`")
                     st.write(f"Got: `{actual}`")
             else:
-                st.error(f"❌ Test {i+1}: Error occurred")
-                st.code(test_result['error'], language='text')
+                # Check if this is an assertion error (expected for assertion tests)
+                if 'AssertionError' in test_result['error']:
+                    st.error(f"❌ Test {i+1}: Assertion failed")
+                    st.code(test_result['error'], language='text')
+                else:
+                    st.error(f"❌ Test {i+1}: Error occurred")
+                    st.code(test_result['error'], language='text')
         
         # Check if all tests passed
         if passed_tests == total_tests:
@@ -363,6 +447,225 @@ def submit_solution(code, exercise):
                 st.markdown(feedback)
             except Exception as e:
                 st.info("Code quality analysis not available for this submission.")
+
+def display_exercise_builder():
+    """Display the custom exercise builder interface"""
+    st.header("🔨 Create Your Own Exercise")
+    st.markdown("Design custom Python coding challenges for yourself and others!")
+    
+    # Template selection
+    with st.expander("📝 Use a Template (Optional)"):
+        templates = get_example_exercise_templates()
+        template_names = ["None"] + list(templates.keys())
+        selected_template = st.selectbox(
+            "Choose a template to start with:",
+            template_names,
+            format_func=lambda x: x.replace("_", " ").title() if x != "None" else "Start from scratch"
+        )
+        
+        if selected_template != "None" and st.button("Load Template"):
+            template_data = templates[selected_template]
+            for key, value in template_data.items():
+                if key == "test_cases":
+                    st.session_state[f"builder_{key}"] = "\n".join([f"# Test {i+1}:\n{tc['test']}\n# Expected: {tc['expected']}\n" for i, tc in enumerate(value)])
+                else:
+                    st.session_state[f"builder_{key}"] = value
+            st.success("Template loaded! You can modify the fields below.")
+    
+    # Exercise creation form
+    with st.form("exercise_builder"):
+        st.subheader("Exercise Details")
+        
+        # Basic information
+        col1, col2 = st.columns(2)
+        with col1:
+            title = st.text_input(
+                "Exercise Title*",
+                value=st.session_state.get('builder_title', ''),
+                placeholder="e.g., Calculate Average Grade"
+            )
+        
+        with col2:
+            difficulty = st.selectbox(
+                "Difficulty Level*",
+                get_difficulty_options(),
+                index=get_difficulty_options().index(st.session_state.get('builder_difficulty', 'beginner'))
+            )
+        
+        # Description
+        description = st.text_area(
+            "Exercise Description*",
+            value=st.session_state.get('builder_description', ''),
+            placeholder="Describe what the student needs to implement...",
+            height=100
+        )
+        
+        # Code components
+        col1, col2 = st.columns(2)
+        with col1:
+            starter_code = st.text_area(
+                "Starter Code (Optional)",
+                value=st.session_state.get('builder_starter_code', '# Write your code here\n'),
+                placeholder="Provide initial code structure...",
+                height=100
+            )
+        
+        with col2:
+            example = st.text_area(
+                "Example Solution (Optional)",
+                value=st.session_state.get('builder_example', ''),
+                placeholder="Show a sample solution...",
+                height=100
+            )
+        
+        # Hint and tags
+        hint = st.text_input(
+            "Hint (Optional)",
+            value=st.session_state.get('builder_hint', ''),
+            placeholder="Give students a helpful hint..."
+        )
+        
+        tags = st.text_input(
+            "Tags (Optional)",
+            value=st.session_state.get('builder_tags', ''),
+            placeholder="loops, functions, lists (comma-separated)"
+        )
+        
+        # Test cases
+        st.subheader("Test Cases (Optional)")
+        st.markdown("""
+        **Test Case Formats:**
+        - **Assertion tests** (recommended): `assert function_name(args) == expected`
+        - **Output tests**: Use `print(result)` and specify expected output
+        """)
+        test_cases_text = st.text_area(
+            "Test Cases",
+            value=st.session_state.get('builder_test_cases', ''),
+            placeholder="# Test 1 - Assertion based (recommended):\nresult = my_function(5, 3)\nassert result == 8\n# Expected: \n\n# Test 2 - Output based:\nprint(my_function(10, 2))\n# Expected: 5",
+            height=120,
+            help="Write Python test code. For assertion tests, leave Expected empty. For output tests, specify what should be printed."
+        )
+        
+        # Submit button
+        submitted = st.form_submit_button("✨ Create Exercise", type="primary")
+        
+        if submitted:
+            # Validate required fields
+            if not title.strip() or not description.strip():
+                st.error("Please fill in all required fields (marked with *)")
+            else:
+                # Parse test cases
+                test_cases = []
+                if test_cases_text.strip():
+                    try:
+                        # Simple parsing of test cases
+                        lines = test_cases_text.strip().split('\n')
+                        current_test = ""
+                        current_expected = ""
+                        
+                        for line in lines:
+                            line = line.strip()
+                            if line.startswith('# Expected:'):
+                                current_expected = line.replace('# Expected:', '').strip()
+                                if current_test:
+                                    test_cases.append({
+                                        "test": current_test,
+                                        "expected": current_expected
+                                    })
+                                current_test = ""
+                            elif line.startswith('#'):
+                                # Start of new test case
+                                current_test = ""
+                            elif line and not line.startswith('#'):
+                                current_test += line + "\n"
+                    except Exception as e:
+                        st.warning("Could not parse test cases. Exercise created without tests.")
+                
+                # Prepare exercise data
+                exercise_data = {
+                    "title": title,
+                    "difficulty": difficulty,
+                    "description": description,
+                    "starter_code": starter_code,
+                    "example": example,
+                    "hint": hint,
+                    "test_cases": test_cases,
+                    "tags": [tag.strip() for tag in tags.split(',') if tag.strip()]
+                }
+                
+                # Add exercise
+                if st.session_state.custom_exercise_manager.add_exercise(exercise_data):
+                    st.success("🎉 Exercise created successfully!")
+                    # Clear form
+                    for key in list(st.session_state.keys()):
+                        if isinstance(key, str) and key.startswith('builder_'):
+                            del st.session_state[key]
+                    st.rerun()
+                else:
+                    st.error("Failed to create exercise. Please check your input.")
+
+def display_custom_exercises():
+    """Display the list of custom exercises"""
+    st.header("📝 My Custom Exercises")
+    
+    custom_exercises = st.session_state.custom_exercise_manager.get_all_custom_exercises()
+    
+    if not custom_exercises:
+        st.info("No custom exercises yet. Create your first exercise using the Exercise Builder!")
+        if st.button("🔨 Create Exercise"):
+            st.session_state.current_page = "custom_builder"
+            st.rerun()
+        return
+    
+    # Search and filter
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        search_query = st.text_input("🔍 Search exercises", placeholder="Search by title, description, or tags...")
+    
+    with col2:
+        filter_difficulty = st.selectbox("Filter by difficulty", ["All"] + get_difficulty_options())
+    
+    # Apply filters
+    filtered_exercises = custom_exercises
+    
+    if search_query:
+        filtered_exercises = st.session_state.custom_exercise_manager.search_exercises(search_query)
+    
+    if filter_difficulty != "All":
+        filtered_exercises = [ex for ex in filtered_exercises if ex['difficulty'] == filter_difficulty.lower()]
+    
+    # Display exercises
+    if not filtered_exercises:
+        st.info("No exercises match your search criteria.")
+        return
+    
+    st.markdown(f"Showing {len(filtered_exercises)} exercise(s)")
+    
+    for exercise in filtered_exercises:
+        with st.expander(f"{exercise['title']} ({exercise['difficulty'].title()})"):
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                st.markdown(f"**Description:** {exercise['description'][:200]}...")
+                if exercise.get('tags'):
+                    tags_str = ", ".join(exercise['tags'])
+                    st.markdown(f"**Tags:** {tags_str}")
+                st.markdown(f"**Created:** {exercise['created_at'][:10]}")
+            
+            with col2:
+                if st.button("📝 Practice", key=f"practice_{exercise['id']}"):
+                    # Switch to this custom exercise
+                    st.session_state.current_page = "exercises"
+                    st.session_state.current_exercise_id = exercise['id']
+                    st.session_state.code_content = exercise.get('starter_code', '')
+                    st.rerun()
+                
+                if st.button("🗑️ Delete", key=f"delete_{exercise['id']}"):
+                    if st.session_state.custom_exercise_manager.delete_exercise(exercise['id']):
+                        st.success("Exercise deleted!")
+                        st.rerun()
+                    else:
+                        st.error("Failed to delete exercise.")
 
 if __name__ == "__main__":
     main()
